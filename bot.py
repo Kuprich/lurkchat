@@ -1,85 +1,96 @@
 import config
-import telebot
-from telebot import types
+import logging
+from aiogram import Bot, Dispatcher
+from aiogram import types
 from data.repository import DbRepository
+from aiogram.filters.command import Command
+from aiogram import F
+import asyncio
 
-bot = telebot.TeleBot(config.TOKEN)
+logging.basicConfig(level=logging.INFO)
+
+bot = Bot(config.TOKEN)
+dp = Dispatcher()
 db = DbRepository(config.DB_URL)
 
+search_companion_markup = types.ReplyKeyboardMarkup(
+    keyboard=[[types.KeyboardButton(text='Поиск собеседника')]],
+    resize_keyboard=True
+)
+stop_search_markup = types.ReplyKeyboardMarkup(
+    keyboard=[[types.KeyboardButton(text='Остановить поиск')]],
+    resize_keyboard=True
+)
+empty_markup = types.ReplyKeyboardRemove()
 
-@bot.message_handler(commands=['start'])
-def start_command(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton('Поиск собеседника')
-    markup.add(item1)
 
-    bot.send_message(
-        message.chat.id, f'Привет, {message.from_user.first_name}, добро пожаловать в анонимный чат! нажми на кнопку найти собеседника', reply_markup=markup)
-
-@bot.message_handler(commands=['stop'])
-def stop_command(message):
+@dp.message(Command('start'))
+async def cmd_start(message: types.Message):
     room = db.get_room_by_chat_id(message.chat.id)
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton('Поиск собеседника')
-    markup.add(item1)
-    if not room: return
-    
+    if not room: 
+        await message.answer(f"Привет, {message.from_user.first_name},\nДобро пожаловать в анонимный чат! нажми на кнопку найти собеседника",
+                         reply_markup=search_companion_markup)
+    elif room.is_busy: 
+        await message.answer(f"Имеется активный чат.",reply_markup=empty_markup)
+    else: 
+        await message.answer(f"Идет поиск содеседника.",reply_markup=empty_markup)
+
+
+@dp.message(Command('stop'))
+async def cmd_stop(message: types.Message):
+    room = db.get_room_by_chat_id(message.chat.id)
+
+    if not room:
+        return
+
     if room.is_busy:
         db.delete_room(room)
-        if message.chat.id == room.chat_id_1: 
-            bot.send_message(room.chat_id_2, 'Собеседник завершил чат', reply_markup=markup)
-            bot.send_message(room.chat_id_1, 'Вы завершили чат', reply_markup=markup)
-        else: 
-            bot.send_message(room.chat_id_1, 'Собеседник завершил чат', reply_markup=markup)
-            bot.send_message(room.chat_id_2, 'Вы завершили чат', reply_markup=markup)
+        chat_id = room.chat_id_1 if message.chat.id != room.chat_id_1 else room.chat_id_2
+
+        await bot.send_message(chat_id, 'Собеседник завершил чат', reply_markup=search_companion_markup)
+        await message.answer('Вы завершили чат', reply_markup=search_companion_markup)
+
     else:
-        stop_search(message)
+        await stop_search(message)
 
 
-
-@bot.message_handler(func=lambda message: message.text == 'Поиск собеседника')
-def search_command(message):
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    item1 = types.KeyboardButton('Остановить поиск')
-    markup.add(item1)
-    bot.send_message(message.chat.id, 'Ищем...', reply_markup=markup)
+@dp.message(F.text == 'Поиск собеседника')
+async def search(message: types.Message):
+    await message.answer('Ищем...', reply_markup=stop_search_markup)
 
     room = db.get_free_room()
     if not room:
         db.create_room(message.chat.id)
     else:
-        markup = types.ReplyKeyboardRemove()
-
         db.add_user_to_room(room.id, message.chat.id)
 
-        bot.send_message(room.chat_id_1, 'Собеседник найден, общение начато:',
-                         reply_markup=markup)
-        bot.send_message(message.chat.id, 'Собеседник найден, общение начато:',
-                         reply_markup=markup)
+        await bot.send_message(room.chat_id_1, 'Собеседник найден, общение начато:', reply_markup=empty_markup)
+        await message.answer('Собеседник найден, общение начато:', reply_markup=empty_markup)
 
 
-@bot.message_handler(func=lambda message: message.text == 'Остановить поиск')
-def stop_search(message):
+
+@dp.message(F.text == 'Остановить поиск')
+async def stop_search(message: types.Message):
     room = db.get_room_by_chat_id(message.chat.id)
     if room:
         db.delete_room(room)
-    markup = types.ReplyKeyboardRemove()
-    bot.send_message(message.chat.id, 'Поиск остановлен', reply_markup=markup)
-    
+    await message.answer('Поиск остановлен', reply_markup=empty_markup)
 
-@bot.message_handler(content_types=['text'])
-def bot_message(message):
+
+@dp.message(F.text)
+async def bot_message(message: types.Message):
     active_room = db.get_room_by_chat_id(message.chat.id)
-    if active_room and active_room.is_busy: 
-        markup = types.ReplyKeyboardRemove()
-        if message.chat.id == active_room.chat_id_1: 
-            bot.send_message(active_room.chat_id_2, message.text, reply_markup=markup)
-        else: 
-            bot.send_message(active_room.chat_id_1, message.text, reply_markup=markup)
-    else: 
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        item1 = types.KeyboardButton('Поиск собеседника')
-        markup.add(item1)
-        bot.send_message(message.chat.id, 'Найдите собеседника для общения', reply_markup=markup)
+    if active_room and active_room.is_busy:
+        if message.chat.id == active_room.chat_id_1:
+            await bot.send_message(active_room.chat_id_2, message.text, reply_markup=empty_markup)
+        else:
+            await bot.send_message(active_room.chat_id_1, message.text, reply_markup=empty_markup)
+    else:
+        await message.answer('Найдите собеседника для общения', reply_markup=search_companion_markup)
 
-bot.polling(none_stop=True)
+
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
