@@ -6,7 +6,6 @@ name = "pypi"
 [packages]
 sqlalchemy = "*"
 sqlalchemy-utils = "*"
-telebot = "*"
 aiogram = "*"
 
 [dev-packages]
