@@ -1,23 +1,28 @@
-import logging
-from aiogram import Bot, Dispatcher
-from aiogram import types
+from aiogram import types, Router
 from aiogram.filters.command import Command
 from aiogram import F
-import asyncio
+from app import bot
+from app import db
 
-from data.repository import DbRepository
 from assets.markup_templates import search_companion_markup, stop_search_markup, empty_markup
-import config
-
-logging.basicConfig(level=logging.INFO)
-
-bot = Bot(config.TOKEN)
-dp = Dispatcher()
-db = DbRepository(config.DB_URL)
 
 
-@dp.message(Command('start'))
+router = Router()
+
+@router.message(Command('start'))
 async def cmd_start(message: types.Message):
+    room = db.get_room_by_chat_id(message.chat.id)
+    if not room:
+        await message.answer(f"Привет, {message.from_user.first_name}. Добро пожаловать в анонимный чат! нажми на кнопку найти собеседника",
+                             reply_markup=search_companion_markup)
+        return
+
+    answer_text = "Имеется активный чат." if room.is_busy else "Идет поиск содеседника."
+    await message.answer(answer_text, reply_markup=empty_markup)
+    
+    
+@router.message(Command('menu'))
+async def cmd_menu(message: types.Message):
     room = db.get_room_by_chat_id(message.chat.id)
     if not room:
         await message.answer(f"Привет, {message.from_user.first_name}. Добро пожаловать в анонимный чат! нажми на кнопку найти собеседника",
@@ -28,7 +33,7 @@ async def cmd_start(message: types.Message):
     await message.answer(answer_text, reply_markup=empty_markup)
 
 
-@dp.message(Command('stop'))
+@router.message(Command('stop'))
 async def cmd_stop(message: types.Message):
     room = db.get_room_by_chat_id(message.chat.id)
 
@@ -46,7 +51,7 @@ async def cmd_stop(message: types.Message):
         await stop_search(message)
 
 
-@dp.message(F.text == 'Поиск собеседника')
+@router.message(F.text == 'Поиск собеседника')
 async def search(message: types.Message):
     await message.answer('Ищем...', reply_markup=stop_search_markup)
 
@@ -60,7 +65,7 @@ async def search(message: types.Message):
         await message.answer('Собеседник найден, общение начато:', reply_markup=empty_markup)
 
 
-@dp.message(F.text == 'Остановить поиск')
+@router.message(F.text == 'Остановить поиск')
 async def stop_search(message: types.Message):
     room = db.get_room_by_chat_id(message.chat.id)
     if room:
@@ -68,7 +73,7 @@ async def stop_search(message: types.Message):
     await message.answer('Поиск остановлен', reply_markup=empty_markup)
 
 
-@dp.message(F.text)
+@router.message(F.text)
 async def bot_message(message: types.Message):
     room = db.get_room_by_chat_id(message.chat.id)
     if room and room.is_busy:
@@ -76,10 +81,3 @@ async def bot_message(message: types.Message):
         await bot.send_message(chat_id, message.text, reply_markup=empty_markup)
     else:
         await message.answer('Найдите собеседника для общения', reply_markup=search_companion_markup)
-
-
-async def main():
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
