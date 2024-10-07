@@ -1,13 +1,10 @@
 import logging
 from aiogram import Bot, Dispatcher
-from aiogram import types
-from aiogram.filters.command import Command
-from aiogram import F
 import asyncio
-from handlers import anon_chat
 
+from handlers import anon_chat
 from data.repository import DbRepository
-from assets.markup_templates import search_companion_markup, stop_search_markup, empty_markup
+
 import config
 
 logging.basicConfig(level=logging.INFO)
